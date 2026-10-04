@@ -37,8 +37,41 @@ export interface LandmarkLike {
   visibility?: number;
 }
 
+/** VRM finger segments in hand-landmark order: [bone suffix, from point, to point]. */
+export const FINGER_SEGMENTS: ReadonlyArray<readonly [string, number, number]> = [
+  ['ThumbMetacarpal', 1, 2],
+  ['ThumbProximal', 2, 3],
+  ['ThumbDistal', 3, 4],
+  ['IndexProximal', 5, 6],
+  ['IndexIntermediate', 6, 7],
+  ['IndexDistal', 7, 8],
+  ['MiddleProximal', 9, 10],
+  ['MiddleIntermediate', 10, 11],
+  ['MiddleDistal', 11, 12],
+  ['RingProximal', 13, 14],
+  ['RingIntermediate', 14, 15],
+  ['RingDistal', 15, 16],
+  ['LittleProximal', 17, 18],
+  ['LittleIntermediate', 18, 19],
+  ['LittleDistal', 19, 20],
+];
+
+/** 21-point hand observation (MediaPipe hand world landmarks: metres, camera axes). */
+export interface HandInput {
+  world: readonly LandmarkLike[];
+}
+
+export interface HandSolution {
+  /** Hand orientation in avatar space. */
+  world: Quaternion;
+  /** Avatar-space direction of each finger segment, keyed by FINGER_SEGMENTS suffix. */
+  fingers: Record<string, Vector3>;
+}
+
 export interface SolveOptions {
   mirror: boolean;
+  /** Finger tracking for the PERSON's left/right hand, when available. */
+  hands?: { left?: HandInput; right?: HandInput };
   /** Legs are only driven when this is true (decided with hysteresis by the caller). */
   legsVisible: boolean;
   /** Minimum visibility for a joint to count as seen. */
@@ -50,6 +83,8 @@ export interface PoseSolution {
   rotations: Partial<Record<BoneName, Quaternion>>;
   /** Guest's horizontal position on screen, -1 (left edge) … 1 (right edge). */
   screenX: number;
+  /** Finger tracking per AVATAR side (only when the hand tracker saw that hand). */
+  hands: Partial<Record<'left' | 'right', HandSolution>>;
 }
 
 /** MediaPipe landmark indices for one body side. */
@@ -203,6 +238,13 @@ export function solvePose(
   const vis = (i: number) => image[i]?.visibility ?? world[i]?.visibility ?? 1;
   const { L, R } = sidesFor(opts.mirror);
   const rot: Partial<Record<BoneName, Quaternion>> = {};
+  const hands: PoseSolution['hands'] = {};
+  // Avatar side → which of the person's hands drives it.
+  const handFor = (avatarSide: 'left' | 'right') => {
+    const personSide = opts.mirror ? (avatarSide === 'left' ? 'right' : 'left') : avatarSide;
+    const h = opts.hands?.[personSide];
+    return h && h.world.length >= 21 ? h.world.map((p) => toAvatarSpace(p, opts.mirror)) : null;
+  };
 
   // ---- torso ------------------------------------------------------------------
   const shoulderMid = P[L.shoulder].clone().add(P[R.shoulder]).multiplyScalar(0.5);
@@ -261,16 +303,22 @@ export function solvePose(
     if (!wristSeen) continue;
     rot[`${side}LowerArm`] = arm.lowerLocal;
 
-    // Hand: points from wrist to the knuckles; index→pinky sets the palm roll.
-    if (vis(S.index) >= minVis * 0.6 && vis(S.pinky) >= minVis * 0.6) {
+    // Hand: wrist → knuckles sets the pointing direction; index → pinky knuckle sets the roll.
+    // The hand tracker's 21 points are far more precise than the body tracker's 3 hand points.
+    const H = handFor(side);
+    let handWorld: Quaternion | null = null;
+    if (H) {
+      handWorld = handFrame(restAxis, H[0], H[9], H[5], H[17]);
+    } else if (vis(S.index) >= minVis * 0.6 && vis(S.pinky) >= minVis * 0.6) {
       const knuckles = P[S.index].clone().add(P[S.pinky]).multiplyScalar(0.5);
-      const dir = knuckles.sub(P[S.wrist]).normalize();
-      const across = P[S.index].clone().sub(P[S.pinky]);
-      across.sub(dir.clone().multiplyScalar(across.dot(dir)));
-      if (across.lengthSq() > 1e-8) {
-        const handWorld = pairQuat(restAxis, Z, dir, across.normalize());
-        rot[`${side}Hand`] = clampAngle(arm.lowerWorld.clone().invert().multiply(handWorld), 1.3);
-      }
+      handWorld = handFrame(restAxis, P[S.wrist], knuckles, P[S.index], P[S.pinky]);
+    }
+    if (handWorld) rot[`${side}Hand`] = clampAngle(arm.lowerWorld.clone().invert().multiply(handWorld), 1.3);
+    if (H && handWorld) {
+      const fingers: Record<string, Vector3> = {};
+      for (const [name, a, b] of FINGER_SEGMENTS) fingers[name] = H[b].clone().sub(H[a]).normalize();
+      // Fingers are expressed relative to the (clamped) hand the avatar will actually show.
+      hands[side] = { world: arm.lowerWorld.clone().multiply(rot[`${side}Hand`]!), fingers };
     }
   }
 
@@ -307,7 +355,24 @@ export function solvePose(
   const sx = ((image[11]?.x ?? 0.5) + (image[12]?.x ?? 0.5)) / 2;
   const screenX = Math.max(-1, Math.min(1, ((opts.mirror ? 1 - sx : sx) - 0.5) * 2));
 
-  return { rotations: rot, screenX };
+  return { rotations: rot, screenX, hands };
+}
+
+/** Hand orientation: rest axis → wrist→knuckles, +Z (thumb side in the T-pose) → index→pinky axis. */
+function handFrame(
+  restAxis: Vector3,
+  wrist: Vector3,
+  knuckles: Vector3,
+  index: Vector3,
+  pinky: Vector3,
+): Quaternion | null {
+  const dir = knuckles.clone().sub(wrist);
+  if (dir.lengthSq() < 1e-10) return null;
+  dir.normalize();
+  const across = index.clone().sub(pinky);
+  across.sub(dir.clone().multiplyScalar(across.dot(dir)));
+  if (across.lengthSq() < 1e-10) return null;
+  return pairQuat(restAxis, Z, dir, across.normalize());
 }
 
 /** Hysteresis for "are the legs in view?" so the character doesn't flicker between modes. */
@@ -325,4 +390,68 @@ export class LegVisibility {
     }
     return this.visible;
   }
+}
+
+/** Finger chains in parent → child order (VRM bone suffixes). */
+export const FINGER_CHAINS: ReadonlyArray<readonly string[]> = [
+  ['ThumbMetacarpal', 'ThumbProximal', 'ThumbDistal'],
+  ['IndexProximal', 'IndexIntermediate', 'IndexDistal'],
+  ['MiddleProximal', 'MiddleIntermediate', 'MiddleDistal'],
+  ['RingProximal', 'RingIntermediate', 'RingDistal'],
+  ['LittleProximal', 'LittleIntermediate', 'LittleDistal'],
+];
+
+/**
+ * Local rotations that point each finger bone along the tracked direction.
+ * @param restDirs each finger bone's direction in the character's rest pose (from its skeleton)
+ */
+export function fingerRotations(
+  hand: HandSolution,
+  restDirs: Record<string, Vector3>,
+): Record<string, Quaternion> {
+  const out: Record<string, Quaternion> = {};
+  for (const chain of FINGER_CHAINS) {
+    let parentWorld = hand.world.clone();
+    for (const name of chain) {
+      const rest = restDirs[name];
+      const target = hand.fingers[name];
+      if (!rest || !target) break;
+      const local = target.clone().applyQuaternion(parentWorld.clone().invert());
+      const q = clampAngle(new Quaternion().setFromUnitVectors(rest, local.normalize()), 1.9);
+      out[name] = q;
+      parentWorld = parentWorld.multiply(q);
+    }
+  }
+  return out;
+}
+
+/** Finger poses for holding props (radians of curl per joint: base, middle, tip). */
+export const GRIPS: Record<
+  'pistol' | 'fist' | 'open' | 'relaxed',
+  Record<'Thumb' | 'Index' | 'Other', [number, number, number]>
+> = {
+  pistol: { Thumb: [0.35, 0.45, 0.35], Index: [0.25, 0.2, 0.1], Other: [1.35, 1.45, 1.0] },
+  fist: { Thumb: [0.5, 0.6, 0.45], Index: [1.3, 1.45, 1.0], Other: [1.35, 1.45, 1.0] },
+  open: { Thumb: [0.05, 0.05, 0.05], Index: [0.05, 0.05, 0.03], Other: [0.05, 0.05, 0.03] },
+  relaxed: { Thumb: [0.2, 0.25, 0.2], Index: [0.25, 0.3, 0.2], Other: [0.3, 0.4, 0.25] },
+};
+
+/** Local rotations that curl every finger towards the palm (palm faces −Y in the VRM T-pose). */
+export function gripRotations(
+  grip: keyof typeof GRIPS,
+  restDirs: Record<string, Vector3>,
+): Record<string, Quaternion> {
+  const out: Record<string, Quaternion> = {};
+  const palm = new Vector3(0, -1, 0);
+  for (const chain of FINGER_CHAINS) {
+    const finger = chain[0].startsWith('Thumb') ? 'Thumb' : chain[0].startsWith('Index') ? 'Index' : 'Other';
+    chain.forEach((name, i) => {
+      const rest = restDirs[name];
+      if (!rest) return;
+      const axis = new Vector3().crossVectors(rest, palm);
+      if (axis.lengthSq() < 1e-8) return;
+      out[name] = new Quaternion().setFromAxisAngle(axis.normalize(), GRIPS[grip][finger][i]);
+    });
+  }
+  return out;
 }

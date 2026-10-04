@@ -12,6 +12,7 @@
   "switchHoldSeconds": 1.0,
   "leaveTimeoutSeconds": 3,
   "minPoseConfidence": 0.5,
+  "handTracking": true,
   "smoothing": 0.6,
   "showCameraPiP": false,
   "photoEnabled": false,

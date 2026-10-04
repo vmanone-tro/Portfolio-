@@ -1,4 +1,5 @@
 // Phase 1 debug view: stick figure over the (mirrored) camera feed.
+import { HAND_CONNECTIONS, type HandObservation } from '../tracking/hands';
 import { POSE_CONNECTIONS, type PosePerson } from '../tracking/pose';
 import { toScreen, type View } from './view';
 
@@ -39,4 +40,25 @@ export function drawSkeletons(
     }
     ctx.globalAlpha = 1;
   });
+}
+
+export function drawHands(ctx: CanvasRenderingContext2D, hands: HandObservation[], view: View): void {
+  const unit = Math.min(view.W, view.H) / 1080;
+  ctx.strokeStyle = '#ffd166';
+  ctx.fillStyle = '#ffffff';
+  ctx.lineWidth = 3 * unit;
+  for (const hand of hands) {
+    const pts = hand.image.map((l) => toScreen(view, l.x, l.y));
+    for (const { start, end } of HAND_CONNECTIONS) {
+      ctx.beginPath();
+      ctx.moveTo(pts[start].x, pts[start].y);
+      ctx.lineTo(pts[end].x, pts[end].y);
+      ctx.stroke();
+    }
+    for (const p of pts) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2.5 * unit, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 }

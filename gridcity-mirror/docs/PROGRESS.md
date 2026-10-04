@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated: Phase 2 complete — the guest drives a 3D character._
+_Last updated: Phase 2 + V's additions — fingers, props (guns/items)._
 
 ## Done
 
@@ -56,9 +56,41 @@ _Last updated: Phase 2 complete — the guest drives a 3D character._
 - Characters are auto-scaled to the same height so swaps (Phase 3) don't jump in size.
 - 43 unit tests (solver accuracy, mirroring, head turn, upper-body mode, no-NaN, plus Phase 1 tests).
 
+### Phase 2b — V's request: full-body + more points, characters holding guns/items
+- **Legs were already tracked** whenever hips and knees are in view. In portrait the guest must stand
+  ~2.5–3 m (8–10 ft) back for the camera to see them; closer than that the app uses upper-body mode.
+- **Finger tracking (21 points per hand)** with MediaPipe's hand tracker (`src/tracking/hands.ts`).
+  At booth distance hands are tiny in the camera picture, so the app cuts a zoomed square around
+  each wrist and tracks the hand inside it. Gives real finger bending and much more accurate wrist
+  aim (important for pointing a gun). Unit tests: every finger segment lands within 4°.
+  Setting: `"handTracking": true/false` in config.json. If tracking gets too slow the app
+  automatically tracks one hand per frame (alternating) instead of dropping the frame rate.
+  _Note: the original spec listed finger tracking as out of scope; added at V's request._
+- **Props**: characters hold items from `characters.json` (`props` list — see
+  `docs/CHARACTER_PACKS.md`). Mirroring handled (a prop in the guest's right hand appears on the
+  right side of the screen). While holding a prop the fingers close into a grip (`pistol` with the
+  trigger finger out, `fist`, or `open`).
+- `characters.json` loader with validation (broken entries skipped and listed in the debug panel).
+- The placeholder Grid Runner now has fingers and holds an original sci-fi blaster
+  (`public/characters/grid-runner/blaster.glb`).
+- Not yet: two-handed weapons (rifles held with both hands) need the second hand to "reach" for the
+  gun — possible later; for now each prop is held by one hand.
+
 ## What V needs to do now
 
-### Phase 2 test — laptop (~5 minutes)
+### Phase 2b test — laptop (~5 minutes)
+1. Open https://vmanone-tro.github.io/Portfolio-/ on the MacBook (refresh). Allow the camera.
+2. The robot now holds a blaster in the hand on your right side. Point your right hand at the
+   screen like a gun, aim around — the blaster should follow your wrist.
+3. Open and close your LEFT hand, wiggle fingers — the robot's left-side fingers copy you
+   (works best when your hand faces the camera, not edge-on).
+4. Stand 8–10 ft back so your whole body is in the picture — the legs start moving too
+   (press **D**: "legs tracked" should say yes).
+5. Press **D** and check "screen fps" stays around 30. If it's much lower, tell the developer
+   (finger tracking can be switched off in `config.json`).
+
+
+### Phase 2 test — laptop (done ✓)
 1. On the MacBook in Chrome open https://vmanone-tro.github.io/Portfolio-/ (refresh if it was open)
    and allow the camera. Stand ~2 m back.
 2. You're the Grid Runner robot. Try: wave, raise both arms, turn your head, lean left/right, step

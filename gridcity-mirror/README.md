@@ -1,6 +1,6 @@
 # Grid City Mirror
 
-## How to start it at an event (current: Phase 2 — you drive one character; double-click launcher arrives in Phase 4)
+## How to start it at an event (current: Phase 2 — you drive one character, fingers + props; double-click launcher arrives in Phase 4)
 1. TV in portrait, camera on top, camera USB + HDMI into the laptop.
 2. Open Terminal in this folder and run: `npm run build && npm run preview` (first time ever: `npm install` while online).
 3. In Chrome open **http://localhost:4173**, allow the camera, press **F** for fullscreen.

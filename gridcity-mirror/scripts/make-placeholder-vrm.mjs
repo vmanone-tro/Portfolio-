@@ -74,6 +74,39 @@ const BONES = [
   ['rightToes', 'rightFoot', [-0.1, 0.03, 0.12]],
 ];
 
+// Fingers (VRM 1.0 names). Hands are palm-down in the T-pose; index is on the thumb side (+Z).
+const FINGERS = [
+  ['Index', 0.03, [0.038, 0.026, 0.022]],
+  ['Middle', 0.01, [0.042, 0.028, 0.024]],
+  ['Ring', -0.011, [0.038, 0.026, 0.022]],
+  ['Little', -0.03, [0.03, 0.02, 0.018]],
+];
+/** [bone, start, end, radius] capsules for finger geometry. */
+const FINGER_SEGMENTS = [];
+for (const s of [1, -1]) {
+  const L = s > 0 ? 'left' : 'right';
+  for (const [f, z, lens] of FINGERS) {
+    let x = 0.785;
+    const names = ['Proximal', 'Intermediate', 'Distal'].map((j) => `${L}${f}${j}`);
+    names.forEach((name, i) => {
+      BONES.push([name, i === 0 ? `${L}Hand` : names[i - 1], [x * s, 1.405, z]]);
+      FINGER_SEGMENTS.push([name, [x * s, 1.405, z], [(x + lens[i]) * s, 1.405, z], 0.0105]);
+      x += lens[i];
+    });
+  }
+  const thumb = [
+    [`${L}ThumbMetacarpal`, `${L}Hand`, [0.705, 1.398, 0.035]],
+    [`${L}ThumbProximal`, `${L}ThumbMetacarpal`, [0.733, 1.396, 0.062]],
+    [`${L}ThumbDistal`, `${L}ThumbProximal`, [0.755, 1.394, 0.08]],
+  ];
+  const tip = [0.775, 1.392, 0.095];
+  thumb.forEach(([name, parent, pos], i) => {
+    BONES.push([name, parent, [pos[0] * s, pos[1], pos[2]]]);
+    const next = i < 2 ? thumb[i + 1][2] : tip;
+    FINGER_SEGMENTS.push([name, [pos[0] * s, pos[1], pos[2]], [next[0] * s, next[1], next[2]], 0.012]);
+  });
+}
+
 function buildBones() {
   const byName = new Map();
   const list = [];
@@ -133,7 +166,7 @@ function box(c, size, rot = [0, 0, 0]) {
 }
 
 function bind(geo, boneIndex) {
-  const g = geo.index ? geo.toNonIndexed() : geo;
+  const g = geo;
   const n = g.attributes.position.count;
   const idx = new Uint16Array(n * 4);
   const w = new Float32Array(n * 4);
@@ -179,9 +212,13 @@ function buildCharacter(r) {
     add('suit', `${L}LowerArm`, capsule([0.47 * s, 1.41, 0], [0.66 * s, 1.41, 0], 0.046 * k));
     add('armor', `${L}LowerArm`, capsule([0.53 * s, 1.41, 0], [0.64 * s, 1.41, 0], 0.056 * k));
     add('accent', `${L}LowerArm`, box([0.585 * s, 1.41, 0.056 * k], [0.08, 0.012, 0.01]));
-    add('armor', `${L}Hand`, box([0.75 * s, 1.405, 0.005], [0.11, 0.045, 0.085]));
-    add('armor', `${L}Hand`, box([0.715 * s, 1.405, 0.055], [0.04, 0.035, 0.035], [0, 0.6 * s, 0]));
+    add('armor', `${L}Hand`, box([0.738 * s, 1.405, 0.0], [0.1, 0.04, 0.082]));
+    add('accent', `${L}Hand`, box([0.738 * s, 1.426, 0.0], [0.05, 0.004, 0.03]));
     add('accent', `${L}UpperArm`, box([0.32 * s, 1.41, 0.053 * k], [0.14, 0.012, 0.01]));
+
+    for (const [bone, a, b, r] of FINGER_SEGMENTS) {
+      if (bone.startsWith(L)) add('armor', bone, capsule(a, b, r));
+    }
 
     // Legs
     add('suit', `${L}UpperLeg`, capsule([0.1 * s, 0.88, 0], [0.1 * s, 0.53, 0], 0.075 * k));
@@ -321,4 +358,52 @@ for (const recipe of RECIPES) {
     0,
   );
   console.log(`wrote ${out} (${(vrm.length / 1024).toFixed(0)} KB, ~${Math.round(tris)} triangles)`);
+}
+
+// ---------------------------------------------------------------------------
+// Props. Convention for every prop file: the grip (where the palm holds it) is at the origin,
+// the "forward" end (barrel / blade) points along +Z, and the top points along +Y. Metres.
+// ---------------------------------------------------------------------------
+function buildBlaster() {
+  const scene = new THREE.Scene();
+  const body = new THREE.MeshStandardMaterial({
+    name: 'body',
+    color: 0x2b3553,
+    roughness: 0.35,
+    metalness: 0.6,
+  });
+  const dark = new THREE.MeshStandardMaterial({
+    name: 'dark',
+    color: 0x10131f,
+    roughness: 0.6,
+    metalness: 0.3,
+  });
+  const glow = new THREE.MeshStandardMaterial({
+    name: 'glow',
+    color: 0x00e5ff,
+    emissive: 0x00e5ff,
+    emissiveIntensity: 1.4,
+  });
+  const part = (geo, mat, pos, rot = [0, 0, 0]) => {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(...pos);
+    m.rotation.set(...rot);
+    scene.add(m);
+  };
+  part(new THREE.BoxGeometry(0.032, 0.1, 0.045), dark, [0, -0.035, -0.005], [-0.28, 0, 0]); // grip
+  part(new THREE.BoxGeometry(0.044, 0.062, 0.2), body, [0, 0.035, 0.055]); // body
+  part(new THREE.BoxGeometry(0.03, 0.02, 0.14), dark, [0, 0.074, 0.05]); // top rail
+  part(new THREE.CylinderGeometry(0.014, 0.016, 0.11, 16), body, [0, 0.04, 0.2], [Math.PI / 2, 0, 0]); // barrel
+  part(new THREE.CylinderGeometry(0.019, 0.019, 0.02, 16), glow, [0, 0.04, 0.26], [Math.PI / 2, 0, 0]); // muzzle
+  part(new THREE.BoxGeometry(0.046, 0.008, 0.15), glow, [0, 0.018, 0.06]); // side light strip
+  part(new THREE.BoxGeometry(0.012, 0.03, 0.035), dark, [0, -0.012, 0.035]); // trigger guard
+  part(new THREE.SphereGeometry(0.016, 12, 8), glow, [0, 0.035, -0.05]); // power cell
+  return scene;
+}
+
+{
+  const glb = await exportGlb(buildBlaster());
+  const out = join(root, 'public', 'characters', 'grid-runner', 'blaster.glb');
+  writeFileSync(out, glb);
+  console.log(`wrote ${out} (${(glb.length / 1024).toFixed(0)} KB)`);
 }

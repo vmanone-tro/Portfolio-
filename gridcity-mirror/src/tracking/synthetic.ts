@@ -154,3 +154,54 @@ export function mockPose(name: string, t: number): SyntheticPose {
       });
   }
 }
+
+export interface HandSpec {
+  /** Direction the fingers point when straight (camera axes). */
+  dir: V;
+  /** Direction from pinky side to index/thumb side. */
+  across: V;
+  /** Direction the palm faces. */
+  palm: V;
+  /** Curl per joint (radians) for thumb, index, middle, ring, little. */
+  curl?: [number, number, number, number, number];
+}
+
+/** 21 MediaPipe hand world landmarks (metres, around the hand centre, camera axes). */
+export function makeHand(spec: HandSpec): LandmarkLike[] {
+  const f = norm(spec.dir);
+  const a = norm(spec.across);
+  const n = norm(spec.palm);
+  const curl = spec.curl ?? [0.2, 0.3, 0.3, 0.3, 0.3];
+  const pts: V[] = Array.from({ length: 21 }, () => [0, 0, 0] as V);
+  // Rotate `v` towards the palm by `ang` around the axis perpendicular to both.
+  const bend = (v: V, ang: number): V => {
+    const vv = norm(v);
+    return norm(add([vv[0] * Math.cos(ang), vv[1] * Math.cos(ang), vv[2] * Math.cos(ang)], n, Math.sin(ang)));
+  };
+  const chain = (start: V, base: V, lens: number[], c: number, first: number) => {
+    let p = start;
+    let d = base;
+    pts[first] = p;
+    lens.forEach((len, i) => {
+      d = bend(d, c * (i === 0 ? 0.9 : 1));
+      p = add(p, d, len);
+      pts[first + i + 1] = p;
+    });
+  };
+  pts[0] = [0, 0, 0];
+  // Thumb: from the base of the palm, diagonally towards the index side.
+  const thumbDir = norm(add(f, a, 1.1));
+  chain(add(add([0, 0, 0], f, 0.025), a, 0.02), thumbDir, [0.035, 0.03, 0.025], curl[0], 1);
+  const fingers: Array<[number, number, number[]]> = [
+    [5, 0.025, [0.04, 0.025, 0.02]],
+    [9, 0.006, [0.045, 0.028, 0.022]],
+    [13, -0.012, [0.04, 0.026, 0.02]],
+    [17, -0.028, [0.032, 0.02, 0.018]],
+  ];
+  fingers.forEach(([first, off, lens], i) =>
+    chain(add(add([0, 0, 0], f, 0.09), a, off), f, lens, curl[i + 1], first),
+  );
+  // MediaPipe centres hand world landmarks on the hand; shift so the origin is the palm centre.
+  const c = add(pts[0], f, 0.05);
+  return pts.map((p) => ({ x: p[0] - c[0], y: p[1] - c[1], z: p[2] - c[2], visibility: 1 }));
+}

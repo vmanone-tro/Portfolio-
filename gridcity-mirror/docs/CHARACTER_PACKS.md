@@ -43,3 +43,24 @@ Showing a game's characters at a public booth to promote your business is a use 
 - Until a character is cleared, use original Grid City characters (e.g. VRoid-made mascots themed on each game's genre: "the space ranger", "the zombie hunter", "the racer"). These are yours outright and can still be labeled "Play [Game] at Grid City VR" in text.
 
 This is the same kind of check you did for X-Plane's commercial licensing. Not legal advice — when in doubt, ask the publisher.
+
+## Props (guns, swords, items) — added by the developer
+A character can hold items. Add a `props` list to its entry in `characters.json`:
+```json
+"props": [
+  {
+    "model": "characters/grid-runner/blaster.glb",
+    "hand": "right",
+    "grip": "pistol",
+    "position": [0, 0, 0],
+    "rotation": [0, 0, 0],
+    "scale": 1.0
+  }
+]
+```
+- `model` — a `.glb` file in the character's folder. **Build it so the handle (where the palm holds it) is at the origin, the front (barrel/blade) points along +Z, and the top points along +Y**, in metres. Then it sits correctly in any character's hand with no tuning.
+- `hand` — which of the **guest's** hands holds it (`"right"` or `"left"`). The app handles mirroring.
+- `grip` — finger pose while holding: `"pistol"` (trigger finger out), `"fist"` (swords, handles, torches), `"open"`.
+- `position` (metres), `rotation` (degrees, X/Y/Z), `scale` — optional fine-tuning if an item sits slightly off.
+- Budget: keep each prop small (≤ 5k triangles, one 1024px texture) — it is drawn every frame.
+- Props can also be built straight into the VRM by the 3D artist (parented to the hand bone); the `props` list is just quicker to change.

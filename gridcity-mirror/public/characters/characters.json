@@ -1,0 +1,25 @@
+[
+  {
+    "id": "grid-runner",
+    "name": "Grid Runner",
+    "game": "Grid City VR",
+    "tagline": "Play this at Grid City VR",
+    "model": "characters/grid-runner/model.vrm",
+    "thumb": "",
+    "background": "",
+    "scale": 1.0,
+    "yOffset": 0.0,
+    "enabled": true,
+    "license": "original — generated for Grid City VR by scripts/make-placeholder-vrm.mjs",
+    "props": [
+      {
+        "model": "characters/grid-runner/blaster.glb",
+        "hand": "right",
+        "grip": "pistol",
+        "position": [0, 0, 0],
+        "rotation": [0, 0, 0],
+        "scale": 1.0
+      }
+    ]
+  }
+]

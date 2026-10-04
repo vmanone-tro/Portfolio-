@@ -20,6 +20,8 @@ export interface Settings {
   switchHoldSeconds: number;
   leaveTimeoutSeconds: number;
   minPoseConfidence: number;
+  /** Track 21 points per hand (fingers + precise wrist aim). Costs extra processing. */
+  handTracking: boolean;
   smoothing: number;
   showCameraPiP: boolean;
   photoEnabled: boolean;
@@ -44,6 +46,7 @@ export const DEFAULT_SETTINGS: Settings = {
   switchHoldSeconds: 1.0,
   leaveTimeoutSeconds: 3,
   minPoseConfidence: 0.5,
+  handTracking: true,
   smoothing: 0.6,
   showCameraPiP: false,
   photoEnabled: false,
@@ -95,6 +98,7 @@ const VALIDATORS: Record<keyof Settings, Validator> = {
   switchHoldSeconds: isNum(0.2, 10),
   leaveTimeoutSeconds: isNum(0.5, 60),
   minPoseConfidence: isNum(0, 1),
+  handTracking: isBool,
   smoothing: isNum(0, 1),
   showCameraPiP: isBool,
   photoEnabled: isBool,

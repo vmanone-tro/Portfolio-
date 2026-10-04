@@ -1,11 +1,14 @@
 // Grid City Mirror — app bootstrap.
-// Phase 2: the guest drives a 3D character (mirrored), camera feed hidden (S shows a corner view).
+// Phase 2: the guest drives a 3D character (mirrored) — body, head, hands and fingers — and the
+// character can hold props. Camera feed hidden (S shows a corner view).
 import './style.css';
 import { Camera, CAMERA_MESSAGES } from './camera/camera';
+import { loadCatalog } from './characters/catalog';
 import { assetUrl, loadSettings, type Settings } from './config/settings';
 import { Avatar } from './render/avatar';
 import { Stage3D } from './render/scene';
 import { LandmarkSmoother } from './tracking/filters';
+import { HandTracker, type HandObservation, type HandPair } from './tracking/hands';
 import { PoseTracker, upperBodyConfidence, type PosePerson } from './tracking/pose';
 import { LegVisibility, solvePose } from './tracking/solver';
 import { mockPose } from './tracking/synthetic';
@@ -14,8 +17,6 @@ import { Overlay } from './ui/overlay';
 import { CameraPiP } from './ui/pip';
 import { fitStage } from './ui/stage';
 
-/** Phase 3 replaces this with the character lineup from characters/characters.json. */
-const DEFAULT_CHARACTER = 'characters/grid-runner/model.vrm';
 /** How long tracking may drop out before the character relaxes (brief misses are bridged). */
 const LOST_GRACE_MS = 400;
 
@@ -50,13 +51,23 @@ async function boot(): Promise<void> {
   window.addEventListener('resize', resize);
   resize();
 
+  // Phase 3 adds switching between characters; for now the first one in characters.json is used.
   let avatar: Avatar | null = null;
   const loadAvatar = async () => {
     try {
-      const a = await Avatar.load(assetUrl(DEFAULT_CHARACTER));
+      const catalog = await loadCatalog();
+      catalog.warnings.forEach((w) => debug.add('warn', w));
+      const ch = catalog.characters[0];
+      if (!ch) throw new Error('no characters in characters.json');
+      const a = await Avatar.load(assetUrl(ch.model));
+      const propErrors = await a.addProps(ch.props, settings.mirror, assetUrl);
+      propErrors.forEach((e) => debug.add('warn', e));
       stage3d.stageRoot.add(a.root);
       avatar = a;
-      debug.add('info', `character loaded: ${DEFAULT_CHARACTER}`);
+      debug.add(
+        'info',
+        `character loaded: ${ch.name} (${ch.props.length} prop${ch.props.length === 1 ? '' : 's'})`,
+      );
     } catch (err) {
       debug.add('error', `character failed to load: ${errMsg(err)} — retrying in 5 s`);
       setTimeout(() => void loadAvatar(), 5000);
@@ -107,6 +118,17 @@ async function boot(): Promise<void> {
   };
   if (!mock) void initTracker();
 
+  // ---- hand / finger tracker (optional: the app works without it) -----------------------
+  let hands: HandTracker | null = null;
+  if (settings.handTracking && !mock) {
+    HandTracker.create()
+      .then((h) => {
+        hands = h;
+        debug.add('info', 'finger tracking ready');
+      })
+      .catch((err) => debug.add('warn', `finger tracking unavailable: ${errMsg(err)}`));
+  }
+
   // ---- operator hotkeys -------------------------------------------------------------
   window.addEventListener('keydown', (e) => {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -133,8 +155,14 @@ async function boot(): Promise<void> {
   const trackFps = new FpsMeter();
   const worldSmoother = new LandmarkSmoother(settings.smoothing);
   const imageSmoother = new LandmarkSmoother(settings.smoothing);
+  const handSmoothers = {
+    left: new LandmarkSmoother(settings.smoothing),
+    right: new LandmarkSmoother(settings.smoothing),
+  };
   const legs = new LegVisibility();
   let people: PosePerson[] = [];
+  let seenHands: HandPair = {};
+  let handFrame = 0;
   let lastSeen = -Infinity;
   let inferenceMs = 0;
   let last = performance.now();
@@ -182,24 +210,48 @@ async function boot(): Promise<void> {
       .sort((a, b) => b.confidence - a.confidence)[0];
     if (guest && fresh) {
       lastSeen = now;
+      if (hands && !mock) {
+        try {
+          // If tracking eats most of a 30 fps frame, track one hand per frame (alternating) and
+          // keep the other hand's last result, instead of letting the whole app slow down.
+          const busy = inferenceMs + hands.inferenceMs > 24;
+          const only = busy ? (++handFrame % 2 ? 'left' : 'right') : undefined;
+          const found = hands.detect(camera.video, guest, 0, now, only);
+          seenHands = only ? { ...seenHands, [only]: found[only] } : found;
+        } catch (err) {
+          debug.add('error', `finger tracking error: ${errMsg(err)} — turned off until reload`);
+          hands.close();
+          hands = null;
+          seenHands = {};
+        }
+      }
+      const smoothedHands: HandPair = {};
+      for (const side of ['left', 'right'] as const) {
+        const h = seenHands[side];
+        if (h) smoothedHands[side] = { ...h, world: handSmoothers[side].apply(h.world, t) };
+        else handSmoothers[side].reset();
+      }
       const world = worldSmoother.apply(guest.worldLandmarks, t);
       const image = imageSmoother.apply(guest.landmarks, t);
       const sol = solvePose(world, image, {
         mirror: settings.mirror,
         legsVisible: legs.update(image, now),
         minVisibility: settings.minPoseConfidence,
+        hands: smoothedHands,
       });
       avatar?.setTarget(sol);
     } else if (now - lastSeen > LOST_GRACE_MS) {
       avatar?.setTarget(null);
       worldSmoother.reset();
       imageSmoother.reset();
+      seenHands = {};
     }
 
     // 3. Draw
     avatar?.update(dt, t, settings.smoothing, stage3d.visibleHalfWidth());
     stage3d.render(t);
-    if (!mock) pip.draw(camera.video, people, settings.mirror, debug.visible);
+    const handList = [seenHands.left, seenHands.right].filter((h): h is HandObservation => !!h);
+    if (!mock) pip.draw(camera.video, people, handList, settings.mirror, debug.visible);
 
     updateText(settings, mock ? 'live' : camera.status, trackerState, avatar !== null, people, overlay);
 
@@ -216,6 +268,12 @@ async function boot(): Promise<void> {
     debug.set('people', people.length);
     debug.set('confidence', best.toFixed(2));
     debug.set('legs tracked', legs.visible ? 'yes' : 'no (upper-body mode)');
+    debug.set(
+      'fingers',
+      hands
+        ? `${handList.length} hand${handList.length === 1 ? '' : 's'} (${hands.inferenceMs.toFixed(1)} ms)`
+        : 'off',
+    );
     debug.set(
       'render',
       `${canvas.width}×${canvas.height} (${settings.orientation}, quality ${settings.quality})`,

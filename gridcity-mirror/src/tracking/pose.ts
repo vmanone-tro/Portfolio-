@@ -38,6 +38,15 @@ export function upperBodyConfidence(lms: ReadonlyArray<{ visibility?: number }>)
 
 let filesetPromise: ReturnType<typeof FilesetResolver.forVisionTasks> | null = null;
 
+/** The MediaPipe WASM runtime, loaded once from public/mediapipe/wasm and shared by all trackers. */
+export async function visionFileset(): ReturnType<typeof FilesetResolver.forVisionTasks> {
+  filesetPromise ??= FilesetResolver.forVisionTasks(assetUrl('mediapipe/wasm'));
+  return filesetPromise.catch((err) => {
+    filesetPromise = null;
+    throw err;
+  });
+}
+
 export class PoseTracker {
   delegate: 'GPU' | 'CPU' = 'GPU';
   private lastTs = 0;
@@ -52,11 +61,7 @@ export class PoseTracker {
     numPoses: number;
     minConfidence: number;
   }): Promise<PoseTracker> {
-    filesetPromise ??= FilesetResolver.forVisionTasks(assetUrl('mediapipe/wasm'));
-    const fileset = await filesetPromise.catch((err) => {
-      filesetPromise = null;
-      throw err;
-    });
+    const fileset = await visionFileset();
     const make = (delegate: 'GPU' | 'CPU') =>
       PoseLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: assetUrl(`mediapipe/pose_landmarker_${opts.model}.task`), delegate },
