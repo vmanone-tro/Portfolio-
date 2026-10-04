@@ -1,0 +1,6 @@
+dist/
+node_modules/
+public/mediapipe/
+public/characters/**/*.vrm
+package-lock.json
+*.md

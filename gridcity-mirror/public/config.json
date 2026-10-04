@@ -1,0 +1,21 @@
+{
+  "orientation": "portrait",
+  "quality": "auto",
+  "poseModel": "full",
+  "renderScale": 1.0,
+  "touchEnabled": true,
+  "cameraDeviceLabel": "",
+  "cameraResolution": [1280, 720],
+  "mirror": true,
+  "maxPeople": 1,
+  "autoRotateSeconds": 20,
+  "switchHoldSeconds": 1.0,
+  "leaveTimeoutSeconds": 3,
+  "minPoseConfidence": 0.5,
+  "smoothing": 0.6,
+  "showCameraPiP": false,
+  "photoEnabled": false,
+  "attractPrompt": "STEP IN — BECOME A CHARACTER",
+  "ctaText": "Play this at Grid City VR",
+  "ctaUrl": ""
+}

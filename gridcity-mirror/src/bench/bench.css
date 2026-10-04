@@ -1,0 +1,130 @@
+body.bench-page {
+  overflow: auto;
+  cursor: auto;
+  touch-action: auto;
+  user-select: text;
+}
+
+.bench-3d {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+}
+
+.bench {
+  position: relative;
+  z-index: 1;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 4vmin 3vmin 30vmin;
+  font-size: max(16px, 2.2vmin);
+}
+
+.bench h1 {
+  font-size: 1.8em;
+  margin: 0 0 0.5em;
+  text-shadow: 0 0 12px var(--gc-cyan);
+}
+
+.bench .lead {
+  max-width: 44em;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 0.6em 0.8em;
+  border-radius: 8px;
+}
+
+.bench .run {
+  font: inherit;
+  font-size: 1.6em;
+  font-weight: 800;
+  padding: 0.7em 1.6em;
+  border-radius: 999px;
+  border: 3px solid var(--gc-cyan);
+  background: rgba(0, 229, 255, 0.15);
+  color: var(--gc-text);
+  cursor: pointer;
+  margin: 0.5em 0;
+}
+
+.bench .run:disabled {
+  opacity: 0.4;
+}
+
+.bench .progress {
+  font-size: 1.3em;
+  margin: 0.6em 0;
+  padding: 0.5em 0.8em;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 8px;
+}
+
+.bench .verdict {
+  margin: 0.8em 0;
+  padding: 0.8em 1em;
+  border-radius: 12px;
+  font-size: 1.3em;
+  display: grid;
+  gap: 0.3em;
+}
+
+.bench .verdict strong {
+  font-size: 1.5em;
+}
+
+.verdict.yes {
+  background: #0f7a3a;
+}
+.verdict.maybe {
+  background: #9a7400;
+}
+.verdict.no {
+  background: #9a1f1f;
+}
+
+.bench .caveats li {
+  color: #ffd166;
+  margin: 0.3em 0;
+}
+
+.bench table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(0, 0, 0, 0.75);
+  margin: 0.8em 0;
+}
+
+.bench th,
+.bench td {
+  padding: 0.4em 0.5em;
+  border-bottom: 1px solid #333;
+  text-align: left;
+}
+
+.bench .device {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.2em 1em;
+  font-size: 0.8em;
+  opacity: 0.85;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 0.6em;
+  border-radius: 8px;
+}
+
+.bench .device dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.bench-preview {
+  position: fixed;
+  right: 2vmin;
+  bottom: 2vmin;
+  width: 24vmin;
+  z-index: 2;
+  transform: scaleX(-1);
+  border: 2px solid var(--gc-cyan);
+  border-radius: 8px;
+}

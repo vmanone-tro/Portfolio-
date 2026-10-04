@@ -1,0 +1,52 @@
+# Builds and tests Grid City Mirror; publishes the test build to GitHub Pages (HTTPS) so it can be
+# opened in Chrome on the Apolosign TV. Publishing starts once Pages is switched on in the repo
+# settings (Settings → Pages → Source: GitHub Actions).
+name: Grid City Mirror
+
+on:
+  push:
+    paths: ['gridcity-mirror/**', '.github/workflows/gridcity-mirror.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: gridcity-mirror-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gridcity-mirror
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: gridcity-mirror/package-lock.json
+      - run: npm ci # also downloads the MediaPipe models (postinstall)
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: gridcity-mirror/dist
+
+  deploy:
+    needs: build
+    if: github.event.repository.has_pages || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

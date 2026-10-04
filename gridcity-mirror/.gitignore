@@ -1,0 +1,7 @@
+node_modules/
+dist/
+# Downloaded by `npm run fetch-models` (runs automatically after `npm install`)
+public/mediapipe/
+photos/*
+!photos/.gitkeep
+.DS_Store
