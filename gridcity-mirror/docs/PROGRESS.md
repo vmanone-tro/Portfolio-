@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated: Phase 1 complete, TV benchmark done (result: NO → Mode B)._
+_Last updated: Phase 2 complete — the guest drives a 3D character._
 
 ## Done
 
@@ -37,7 +37,38 @@ _Last updated: Phase 1 complete, TV benchmark done (result: NO → Mode B)._
   lints, tests and publishes to GitHub Pages.
 - 24 unit tests (settings parsing, benchmark verdict, camera errors, screen mapping).
 
+### Phase 2 — Become a character
+- three.js stage (`src/render/scene.ts`): camera framed head-to-toe for portrait (and landscape),
+  warm key light + cyan/magenta rim lights, flowing neon floor grid, glow under the character.
+- **Pose solver (`src/tracking/solver.ts`) — written in-house, kalidokit removed.** kalidokit was
+  tested first against known poses and put the arms 25–147° away from where the guest's arms were
+  when applied to VRM 1.0 characters (it was built for an older VRM version). The in-house solver
+  aims each bone at the tracked joints and treats elbows/knees as real hinges (no twisted joints):
+  unit tests confirm every limb lands within 3° of the guest's pose, mirrored and not.
+- Mirror: the guest's right hand moves the arm on the right side of the screen (tested).
+- Smoothing: One-Euro filter on landmarks + easing on bone rotations, tuned by `config.smoothing`.
+  Short tracking drop-outs (< 0.4 s) are bridged; after that the character relaxes to an idle pose.
+- Upper-body-only: legs are only driven when hips + knees are clearly visible (with hysteresis, so
+  no flicker); otherwise the character stands normally. Verified with the real test photo.
+- The character slides left/right as the guest moves (clamped to the screen).
+- Camera picture hidden; `S` shows a small mirrored camera window (with skeleton when `D` is on).
+- `?mock=wave|dance|tpose|arms-up|upper-body` previews the character with a fake guest — no camera.
+- Characters are auto-scaled to the same height so swaps (Phase 3) don't jump in size.
+- 43 unit tests (solver accuracy, mirroring, head turn, upper-body mode, no-NaN, plus Phase 1 tests).
+
 ## What V needs to do now
+
+### Phase 2 test — laptop (~5 minutes)
+1. On the MacBook in Chrome open https://vmanone-tro.github.io/Portfolio-/ (refresh if it was open)
+   and allow the camera. Stand ~2 m back.
+2. You're the Grid Runner robot. Try: wave, raise both arms, turn your head, lean left/right, step
+   side to side. The robot should copy you like a mirror (raise your right hand → the arm on the
+   right side of the screen goes up) without shaking.
+3. Step closer so only your top half is visible → the robot keeps standing normally on its legs.
+4. Press **S** to see a small camera window of the real you; press **S** again to hide it.
+5. Tell the developer anything that looks wrong (e.g. "elbow bends the wrong way when I…").
+
+## Earlier tests (done)
 
 ### 1. Turn on the free HTTPS hosting (one time, ~1 minute)
 1. Open https://github.com/vmanone-tro/Portfolio-/settings/pages
@@ -89,9 +120,9 @@ was cheap. Target is 24+. Laptop + TV (Mode B) is the event setup.
 - Open questions from the spec are still open; we're using the defaults: placeholder/original
   characters only, photo feature off, portrait.
 
-## Next — Phase 2: become a character
-Three.js scene, load the placeholder VRM, drive its bones from the tracked pose (kalidokit), mirror,
-smoothing, upper-body-only mode with neutral legs, follow the guest left/right.
+## Next — Phase 3: the booth loop
+Character lineup from `characters.json` (2–3 original placeholder characters), attract screen,
+hand-raise-to-switch with a filling ring, touch thumbnails, 20 s auto-rotate, walk-away reset.
 
 ## Notes for developers
 - Pose inference in the cloud test machine (software GPU) is ~0.5–0.9 s per frame, so fps there means

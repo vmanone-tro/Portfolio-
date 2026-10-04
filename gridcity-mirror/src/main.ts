@@ -1,14 +1,23 @@
 // Grid City Mirror — app bootstrap.
-// Phase 1: mirrored camera + live skeleton, debug panel, camera self-healing.
+// Phase 2: the guest drives a 3D character (mirrored), camera feed hidden (S shows a corner view).
 import './style.css';
 import { Camera, CAMERA_MESSAGES } from './camera/camera';
-import { loadSettings, type Settings } from './config/settings';
-import { drawSkeletons } from './render/skeleton';
-import { coverView, drawVideo } from './render/view';
-import { PoseTracker, type PosePerson } from './tracking/pose';
+import { assetUrl, loadSettings, type Settings } from './config/settings';
+import { Avatar } from './render/avatar';
+import { Stage3D } from './render/scene';
+import { LandmarkSmoother } from './tracking/filters';
+import { PoseTracker, upperBodyConfidence, type PosePerson } from './tracking/pose';
+import { LegVisibility, solvePose } from './tracking/solver';
+import { mockPose } from './tracking/synthetic';
 import { DebugPanel, FpsMeter, captureGlobalErrors } from './ui/debug';
 import { Overlay } from './ui/overlay';
+import { CameraPiP } from './ui/pip';
 import { fitStage } from './ui/stage';
+
+/** Phase 3 replaces this with the character lineup from characters/characters.json. */
+const DEFAULT_CHARACTER = 'characters/grid-runner/model.vrm';
+/** How long tracking may drop out before the character relaxes (brief misses are bridged). */
+const LOST_GRACE_MS = 400;
 
 const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -19,8 +28,8 @@ async function boot(): Promise<void> {
   app.append(stage);
   const canvas = document.createElement('canvas');
   stage.append(canvas);
-  const ctx = canvas.getContext('2d', { alpha: false })!;
   const overlay = new Overlay(stage);
+  const pip = new CameraPiP(stage);
   const debug = new DebugPanel(stage);
   captureGlobalErrors(debug);
   overlay.setStatus('Getting ready…');
@@ -28,16 +37,32 @@ async function boot(): Promise<void> {
   const { settings, warnings } = await loadSettings();
   warnings.forEach((w) => debug.add('warn', w));
   if (settings.debug) debug.toggle(true);
+  pip.visible = settings.showCameraPiP;
+  /** `?mock=wave|dance|tpose|arms-up|upper-body` — preview with a fake guest, no camera needed. */
+  const mock = new URLSearchParams(location.search).get('mock');
 
-  // ---- layout -------------------------------------------------------------
+  // ---- 3D stage -------------------------------------------------------------
+  const stage3d = new Stage3D(canvas);
   const resize = () => {
     const { width, height } = fitStage(stage, settings.orientation);
-    const scale = Math.min(window.devicePixelRatio || 1, 2) * settings.renderScale;
-    canvas.width = Math.max(1, Math.round(width * scale));
-    canvas.height = Math.max(1, Math.round(height * scale));
+    stage3d.resize(width, height, Math.min(window.devicePixelRatio || 1, 2) * settings.renderScale);
   };
   window.addEventListener('resize', resize);
   resize();
+
+  let avatar: Avatar | null = null;
+  const loadAvatar = async () => {
+    try {
+      const a = await Avatar.load(assetUrl(DEFAULT_CHARACTER));
+      stage3d.stageRoot.add(a.root);
+      avatar = a;
+      debug.add('info', `character loaded: ${DEFAULT_CHARACTER}`);
+    } catch (err) {
+      debug.add('error', `character failed to load: ${errMsg(err)} — retrying in 5 s`);
+      setTimeout(() => void loadAvatar(), 5000);
+    }
+  };
+  void loadAvatar();
 
   // ---- camera ---------------------------------------------------------------
   const camera = new Camera({
@@ -51,16 +76,19 @@ async function boot(): Promise<void> {
     if (camera.status === lastCameraStatus) return;
     lastCameraStatus = camera.status;
     const level = camera.status === 'live' || camera.status === 'starting' ? 'info' : 'warn';
-    debug.add(
-      level,
-      `camera: ${camera.status}${camera.status === 'live' ? ` — ${camera.label} ${camera.width}×${camera.height}` : camera.lastError ? ` — ${camera.lastError}` : ''}`,
-    );
+    const detail =
+      camera.status === 'live'
+        ? ` — ${camera.label} ${camera.width}×${camera.height}`
+        : camera.lastError
+          ? ` — ${camera.lastError}`
+          : '';
+    debug.add(level, `camera: ${camera.status}${detail}`);
   };
-  void camera.start();
+  if (!mock) void camera.start();
 
   // ---- pose tracker (retries until it loads) -------------------------------------
   let tracker: PoseTracker | null = null;
-  let trackerState: 'loading' | 'ready' | 'failed' = 'loading';
+  let trackerState: 'loading' | 'ready' | 'failed' = mock ? 'ready' : 'loading';
   const initTracker = async () => {
     trackerState = 'loading';
     try {
@@ -77,10 +105,9 @@ async function boot(): Promise<void> {
       setTimeout(() => void initTracker(), 5000);
     }
   };
-  void initTracker();
+  if (!mock) void initTracker();
 
   // ---- operator hotkeys -------------------------------------------------------------
-  let showFeed = true;
   window.addEventListener('keydown', (e) => {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
     switch (e.key.toLowerCase()) {
@@ -95,8 +122,8 @@ async function boot(): Promise<void> {
         toggleFullscreen();
         break;
       case 's':
-        showFeed = !showFeed;
-        overlay.toast(showFeed ? 'Camera feed on' : 'Camera feed off');
+        pip.visible = !pip.visible;
+        overlay.toast(pip.visible ? 'Camera view on' : 'Camera view off');
         break;
     }
   });
@@ -104,51 +131,95 @@ async function boot(): Promise<void> {
   // ---- render loop (never allowed to die) ---------------------------------------------
   const fps = new FpsMeter();
   const trackFps = new FpsMeter();
+  const worldSmoother = new LandmarkSmoother(settings.smoothing);
+  const imageSmoother = new LandmarkSmoother(settings.smoothing);
+  const legs = new LegVisibility();
   let people: PosePerson[] = [];
+  let lastSeen = -Infinity;
   let inferenceMs = 0;
+  let last = performance.now();
 
   const step = (now: number) => {
+    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
+    last = now;
+    const t = now / 1000;
     fps.tick(now);
-    const newFrame = camera.hasNewFrame(now);
-    if (camera.status !== 'live') people = [];
-    if (newFrame && tracker) {
-      try {
-        const result = tracker.detect(camera.video, now);
-        people = result.people;
-        inferenceMs = inferenceMs * 0.9 + result.inferenceMs * 0.1;
-        trackFps.tick(now);
-      } catch (err) {
-        debug.add('error', `tracking error: ${errMsg(err)} — reloading tracker`);
-        tracker.close();
-        tracker = null;
-        void initTracker();
+
+    // 1. Track
+    let fresh = false;
+    if (mock) {
+      const m = mockPose(mock, t);
+      people = [
+        {
+          landmarks: m.image as PosePerson['landmarks'],
+          worldLandmarks: m.world as PosePerson['worldLandmarks'],
+          confidence: upperBodyConfidence(m.image),
+        },
+      ];
+      fresh = true;
+    } else {
+      const newFrame = camera.hasNewFrame(now);
+      if (camera.status !== 'live') people = [];
+      if (newFrame && tracker) {
+        try {
+          const result = tracker.detect(camera.video, now);
+          people = result.people;
+          inferenceMs = inferenceMs * 0.9 + result.inferenceMs * 0.1;
+          trackFps.tick(now);
+          fresh = true;
+        } catch (err) {
+          debug.add('error', `tracking error: ${errMsg(err)} — reloading tracker`);
+          tracker.close();
+          tracker = null;
+          void initTracker();
+        }
       }
     }
 
-    const W = canvas.width;
-    const H = canvas.height;
-    ctx.fillStyle = '#05060d';
-    ctx.fillRect(0, 0, W, H);
-    const view = coverView(camera.video.videoWidth, camera.video.videoHeight, W, H, settings.mirror);
-    if (camera.status === 'live' && showFeed && camera.video.readyState >= 2) {
-      ctx.globalAlpha = 0.85;
-      drawVideo(ctx, camera.video, view);
-      ctx.globalAlpha = 1;
+    // 2. Solve the most confident guest (two-person mode arrives in Phase 4)
+    const guest = people
+      .filter((p) => p.confidence >= settings.minPoseConfidence * 0.6)
+      .sort((a, b) => b.confidence - a.confidence)[0];
+    if (guest && fresh) {
+      lastSeen = now;
+      const world = worldSmoother.apply(guest.worldLandmarks, t);
+      const image = imageSmoother.apply(guest.landmarks, t);
+      const sol = solvePose(world, image, {
+        mirror: settings.mirror,
+        legsVisible: legs.update(image, now),
+        minVisibility: settings.minPoseConfidence,
+      });
+      avatar?.setTarget(sol);
+    } else if (now - lastSeen > LOST_GRACE_MS) {
+      avatar?.setTarget(null);
+      worldSmoother.reset();
+      imageSmoother.reset();
     }
-    drawSkeletons(ctx, people, view, settings.minPoseConfidence);
 
-    updateText(settings, camera, trackerState, people, overlay);
+    // 3. Draw
+    avatar?.update(dt, t, settings.smoothing, stage3d.visibleHalfWidth());
+    stage3d.render(t);
+    if (!mock) pip.draw(camera.video, people, settings.mirror, debug.visible);
+
+    updateText(settings, mock ? 'live' : camera.status, trackerState, avatar !== null, people, overlay);
 
     const best = people.reduce((m, p) => Math.max(m, p.confidence), 0);
     debug.set('screen fps', fps.fps.toFixed(1));
-    debug.set('tracking fps', trackFps.fps.toFixed(1));
+    debug.set('tracking fps', mock ? 'mock' : trackFps.fps.toFixed(1));
     debug.set('pose inference', `${inferenceMs.toFixed(1)} ms`);
-    debug.set('pose model', tracker ? `${tracker.model} (${tracker.delegate})` : trackerState);
-    debug.set('camera', camera.status === 'live' ? `${camera.label}` : camera.status);
+    debug.set(
+      'pose model',
+      mock ? `mock: ${mock}` : tracker ? `${tracker.model} (${tracker.delegate})` : trackerState,
+    );
+    debug.set('camera', camera.status === 'live' ? camera.label : camera.status);
     debug.set('camera resolution', `${camera.width}×${camera.height}`);
     debug.set('people', people.length);
     debug.set('confidence', best.toFixed(2));
-    debug.set('canvas', `${W}×${H} (${settings.orientation}, quality ${settings.quality})`);
+    debug.set('legs tracked', legs.visible ? 'yes' : 'no (upper-body mode)');
+    debug.set(
+      'render',
+      `${canvas.width}×${canvas.height} (${settings.orientation}, quality ${settings.quality})`,
+    );
     debug.set('errors', debug.errorCount);
     debug.tick(now);
   };
@@ -166,19 +237,23 @@ async function boot(): Promise<void> {
 
 function updateText(
   settings: Settings,
-  camera: Camera,
+  cameraStatus: Camera['status'],
   trackerState: string,
+  avatarReady: boolean,
   people: PosePerson[],
   overlay: Overlay,
 ): void {
-  if (camera.status !== 'live') {
-    const m = CAMERA_MESSAGES[camera.status];
+  if (cameraStatus !== 'live') {
+    const m = CAMERA_MESSAGES[cameraStatus];
     overlay.setStatus(m.title, m.detail);
     overlay.setPrompt('');
     return;
   }
-  if (trackerState !== 'ready') {
-    overlay.setStatus('Getting ready…', 'Loading body tracking');
+  if (trackerState !== 'ready' || !avatarReady) {
+    overlay.setStatus(
+      'Getting ready…',
+      trackerState !== 'ready' ? 'Loading body tracking' : 'Loading character',
+    );
     overlay.setPrompt('');
     return;
   }
@@ -196,7 +271,7 @@ function toggleFullscreen(): void {
 }
 
 boot().catch((err) => {
-  // Last-resort: something failed before the loop started. Show a calm message and reload.
+  // Last resort: something failed before the loop started. Show a calm message and reload.
   console.error(err);
   document.body.insertAdjacentHTML(
     'beforeend',

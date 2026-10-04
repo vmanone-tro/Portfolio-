@@ -1,6 +1,6 @@
 # Grid City Mirror
 
-## How to start it at an event (current: Phase 1 — skeleton view; double-click launcher arrives in Phase 4)
+## How to start it at an event (current: Phase 2 — you drive one character; double-click launcher arrives in Phase 4)
 1. TV in portrait, camera on top, camera USB + HDMI into the laptop.
 2. Open Terminal in this folder and run: `npm run build && npm run preview` (first time ever: `npm install` while online).
 3. In Chrome open **http://localhost:4173**, allow the camera, press **F** for fullscreen.
@@ -17,7 +17,8 @@ mirrored, as a 3D character from the Grid City lineup. Planning docs: [`CLAUDE.m
 
 | URL                   | What                                                               |
 | --------------------- | ------------------------------------------------------------------ |
-| `/`                   | The mirror app (Phase 1: mirrored camera + body-tracking skeleton) |
+| `/`                   | The mirror app (Phase 2: the guest drives a 3D character)          |
+| `/?mock=wave`         | Preview with a fake guest, no camera (`wave`, `dance`, `tpose`, `arms-up`, `upper-body`) |
 | `/bench/`             | Device benchmark — can the TV run the app by itself?               |
 | `/?debug=1`           | Start with the debug panel open                                    |
 | `/?quality=low`       | Any `config.json` setting can be overridden in the URL             |
@@ -32,7 +33,7 @@ GitHub Actions once Pages is enabled (see `docs/PROGRESS.md`).
 | D   | Debug panel                               |
 | C   | Next camera                               |
 | F   | Fullscreen                                |
-| S   | Show / hide the camera picture            |
+| S   | Show / hide the small real-camera view    |
 
 ## Developer commands
 

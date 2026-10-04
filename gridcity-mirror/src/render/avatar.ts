@@ -1,7 +1,9 @@
-// VRM loading. (Phase 2 adds pose → bone application and character swapping here.)
+// VRM loading and driving a character's bones from the pose solver.
 import { VRMLoaderPlugin, VRMUtils, type VRM } from '@pixiv/three-vrm';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { BoneName, PoseSolution } from '../tracking/solver';
+import { makeSpotlightDisc } from './scene';
 
 export type { VRM };
 
@@ -59,4 +61,111 @@ export function animateWave(vrm: VRM, t: number): void {
   set('leftUpperLeg', 0, 0, 0.04);
   set('rightUpperLeg', 0, 0, -0.04);
   vrm.update(1 / 60);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Driving a character from the solver
+// ---------------------------------------------------------------------------------------------
+const DRIVEN: BoneName[] = [
+  'hips',
+  'spine',
+  'chest',
+  'neck',
+  'head',
+  'leftUpperArm',
+  'leftLowerArm',
+  'leftHand',
+  'rightUpperArm',
+  'rightLowerArm',
+  'rightHand',
+  'leftUpperLeg',
+  'leftLowerLeg',
+  'leftFoot',
+  'rightUpperLeg',
+  'rightLowerLeg',
+  'rightFoot',
+];
+
+const q = (axis: THREE.Vector3, angle: number) => new THREE.Quaternion().setFromAxisAngle(axis, angle);
+const AX = new THREE.Vector3(1, 0, 0);
+const AY = new THREE.Vector3(0, 1, 0);
+const AZ = new THREE.Vector3(0, 0, 1);
+
+/** Relaxed standing pose (arms down, slight elbow bend) used when a body part isn't tracked. */
+const NEUTRAL: Partial<Record<BoneName, THREE.Quaternion>> = {
+  leftUpperArm: q(AZ, -1.25),
+  rightUpperArm: q(AZ, 1.25),
+  leftLowerArm: q(AY, -0.2),
+  rightLowerArm: q(AY, 0.2),
+};
+
+/** Target height (metres) every character is scaled to, so swaps don't jump in size. */
+const TARGET_HEIGHT = 1.72;
+
+export class Avatar {
+  /** Moves sideways with the guest. Contains the VRM and its floor glow. */
+  readonly root = new THREE.Group();
+  private current = new Map<BoneName, THREE.Quaternion>();
+  private target: PoseSolution | null = null;
+  private x = 0;
+
+  private constructor(readonly vrm: VRM) {
+    this.root.add(vrm.scene);
+    this.root.add(makeSpotlightDisc());
+    for (const b of DRIVEN) this.current.set(b, (NEUTRAL[b] ?? new THREE.Quaternion()).clone());
+    // Normalise size from the rest pose: head height ≈ 0.91 × body height.
+    vrm.scene.updateMatrixWorld(true);
+    const head = vrm.humanoid.getNormalizedBoneNode('head');
+    const headY = head ? head.getWorldPosition(new THREE.Vector3()).y : TARGET_HEIGHT * 0.91;
+    const scale = headY > 0.1 ? (TARGET_HEIGHT * 0.91) / headY : 1;
+    vrm.scene.scale.setScalar(scale);
+  }
+
+  static async load(url: string): Promise<Avatar> {
+    return new Avatar(await loadVrm(url));
+  }
+
+  /** Latest tracking result, or null when nobody is there (character relaxes to idle). */
+  setTarget(sol: PoseSolution | null): void {
+    this.target = sol;
+  }
+
+  /**
+   * @param dt seconds since last frame
+   * @param smoothing config.smoothing (0..1) — higher is calmer but laggier
+   * @param halfWidth how far (metres) the character may walk sideways
+   */
+  update(dt: number, t: number, smoothing: number, halfWidth: number): void {
+    const h = this.vrm.humanoid;
+    const tracked = this.target !== null;
+    // Exponential approach: frame-rate independent. Tracked bones follow fast; untracked ones relax.
+    const followRate = 26 - 16 * smoothing;
+    const relaxRate = 4;
+    const breathe = Math.sin(t * 1.6) * 0.015;
+
+    for (const b of DRIVEN) {
+      let goal = this.target?.rotations[b];
+      let rate = followRate;
+      if (!goal) {
+        goal = NEUTRAL[b] ?? new THREE.Quaternion();
+        rate = relaxRate;
+        if (!tracked && (b === 'spine' || b === 'chest')) goal = goal.clone().multiply(q(AX, breathe));
+        if (!tracked && b === 'head') goal = q(AY, Math.sin(t * 0.5) * 0.12);
+      }
+      const cur = this.current.get(b)!;
+      cur.slerp(goal, 1 - Math.exp(-rate * dt));
+      h.getNormalizedBoneNode(b)?.quaternion.copy(cur);
+    }
+
+    const maxX = Math.max(0, halfWidth - 0.3);
+    const goalX = tracked ? this.target!.screenX * maxX : 0;
+    this.x += (goalX - this.x) * (1 - Math.exp(-(tracked ? 6 : 2) * dt));
+    this.root.position.x = this.x;
+    this.vrm.update(dt);
+  }
+
+  dispose(): void {
+    this.root.removeFromParent();
+    VRMUtils.deepDispose(this.vrm.scene);
+  }
 }
