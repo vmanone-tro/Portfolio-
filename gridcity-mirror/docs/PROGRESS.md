@@ -1,6 +1,6 @@
 # Progress
 
-_Last updated: Phase 0 + Phase 1 complete._
+_Last updated: Phase 1 complete, TV benchmark done (result: NO → Mode B)._
 
 ## Done
 
@@ -64,9 +64,28 @@ _Last updated: Phase 0 + Phase 1 complete._
    - If Chrome says there's no camera: the TV may not support USB cameras in Chrome — tell the
      developer (that answers open question 5 and means Mode B, laptop + TV).
 
+## Apolosign TV benchmark (run by V)
+
+| Setting | Camera gave | Screen fps | Tracking fps | Camera fps | Pose ms | Person seen |
+| --- | --- | --- | --- | --- | --- | --- |
+| lite @ 640×480 | 640×480 | 13.4 | 13.3 | 15.1 | 69.1 | 100% |
+| lite @ 1280×720 | 1280×720 | 11.5 | 11.5 | 29.8 | 79.5 | 100% |
+| full @ 640×480 | 640×480 | 10.4 | 10.4 | 15.1 | 89.5 | 100% |
+| full @ 1280×720 | 1280×720 | 10.0 | 10.0 | 29.8 | 91.7 | 100% |
+
+**Verdict: NO.** The TV's chip needs 70–90 ms per pose (≈11–14 per second); the 3D drawing itself
+was cheap. Target is 24+. Laptop + TV (Mode B) is the event setup.
+
+- The camera works when plugged into the TV (open question 5: **yes**). It delivers 30 fps at
+  1280×720 and 15 fps at 640×480 (a camera limit, not lighting — the "too little light" warning on
+  that screen was wrong and has been fixed).
+- Possible later experiment (Phase 4, optional): run tracking in a background thread on the TV so
+  the character animates smoothly at 30 fps while the pose updates ~12×/s. Motion would lag a
+  little (~0.1–0.15 s). Not planned unless V wants a cordless booth badly enough to try it.
+
 ## Decisions for V
-- **Benchmark result decides Mode A vs Mode B** (green → TV only, yellow → TV only in low quality,
-  1 person, red → laptop + TV).
+- ~~Benchmark result decides Mode A vs Mode B~~ — **decided: Mode B (laptop + TV)**. Phase 4 builds
+  the double-click Mac launcher; the PWA/TV-only packaging becomes optional.
 - Open questions from the spec are still open; we're using the defaults: placeholder/original
   characters only, photo feature off, portrait.
 

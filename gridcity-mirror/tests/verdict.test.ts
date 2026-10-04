@@ -45,4 +45,10 @@ describe('benchmark verdict', () => {
     expect(caveats([r('full', 640, 30, { cameraFps: 12 })])[0]).toMatch(/light/);
     expect(caveats([r('full', 640, 30)])).toEqual([]);
   });
+
+  it('does not blame the light when only the low-resolution mode is slow (seen on the Apolosign camera)', () => {
+    expect(
+      caveats([r('lite', 640, 13, { cameraFps: 15.1 }), r('lite', 1280, 11, { cameraFps: 29.8 })]),
+    ).toEqual([]);
+  });
 });

@@ -57,7 +57,10 @@ export function caveats(results: BenchResult[]): string[] {
       'Nobody was in front of the camera for much of the test, so results may look better than reality. Run it again while standing in view.',
     );
   }
-  if (results.some((r) => r.cameraFps > 0 && r.cameraFps < 20)) {
+  // Some cameras run their low-resolution mode at 15 fps by design, so only blame the light when
+  // the camera is slow at every resolution we tried.
+  const fastest = Math.max(0, ...results.map((r) => r.cameraFps || 0));
+  if (results.length && fastest > 0 && fastest < 20) {
     out.push(
       'The camera itself delivered fewer than 20 frames per second — usually too little light. Brighten the room and re-run.',
     );
